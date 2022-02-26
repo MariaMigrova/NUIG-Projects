@@ -1,0 +1,763 @@
+---
+title: "PROJECT"
+author: "Maria Migrova"
+date: "8/31/2021"
+output: html_document
+---
+
+```{r}
+#Loading libraries
+library(quanteda)
+library(topicmodels)
+library(wordcloud)
+library(wordcloud2)
+library(corpus)
+library(qdapTools)
+library(qdapRegex)
+library(tm)
+library(stylo)
+library(RTextTools)
+library(SnowballC)
+library(textstem)
+library(tidyverse)
+library(glue)
+library(tidytext)
+library(quanteda)
+library(reshape2)
+library(RColorBrewer)
+library(syuzhet)
+library(ggplot2)
+library(stringr)
+library(SentimentAnalysis)
+library(dplyr)
+library(zoo)
+library(lubridate)
+library(tidyr)
+library(base)
+library(modelr)
+library(e1071)
+library(class)
+library(FNN)
+library(MASS)
+library(Metrics)
+library(MLmetrics)
+library(randomForest)
+library(tidyverse)
+library(dplyr)
+library(zoo)
+library(lubridate)
+library(tidyr)
+library(base)
+library(modelr)
+library(e1071)
+library(class)
+library(FNN)
+library(MASS)
+library(Metrics)
+library(MLmetrics)
+library(rpart.plot)
+library(rpart)
+library(naivebayes)
+library(psych)
+
+```
+
+
+```{r}
+#Reading data
+transcript_df <- read.csv("data.csv",fileEncoding = "UTF-8-BOM")
+#Creating transcriptID
+transcript_df$transcriptID <- c("text")
+transcript_df$transcriptID2 <- c(1:189)
+transcript_df$transcriptID <- paste(transcript_df$transcriptID,transcript_df$transcriptID2)
+transcript_df$transcriptID <- str_replace_all(string=transcript_df$transcriptID, pattern=" ", repl="")
+transcript_df
+
+
+```
+
+```{r}
+#selecting columns
+transcript_df <- transcript_df %>%
+  dplyr::select(transcriptID, createdTime, agentID, callerID, duration, direction, queueName,queueNumber, sentiment, emotion, confidence, transcription)
+
+transcript_df
+```
+
+```{r}
+#using only transcription
+transcript_df1 <- transcript_df%>%
+  dplyr::select(transcription)%>%
+  rename(text=transcription)
+#Changing to corpus
+transcript_df1<- corpus(transcript_df1)
+transcript_df1
+```
+
+```{r}
+#Changing to paragraphs
+corp = corpus_reshape(transcript_df1, to ="paragraphs")
+#Deleting words with one or two letters
+corp <- rm_nchar_words(corp, "1,2")
+#Changing to low letters
+corp <- tolower(corp)
+#Removing numbers
+corp <- removeNumbers(corp)
+#Removing punctuation
+corp <- removePunctuation(corp)
+#Removing words
+corp <- removeWords(corp, c("yeah","can","now","ill","like","ive","okay","dont","one","just","will","thank","get","bye","know","thats","give","let","youre","put","see","back","much","say","see","yes","please","said","right","fine","think","well","five","sure","sorry","mean","want","dot","cant","theres","gonna","actually","even","something","perfect","thanks","kind","great","good","really","take","try","got","use","theyre","call","calling","email","name","address","number","whats","bit","alright","thing","come","make","cause","able","little"))
+#Stemming words
+#Removing english stopwords
+dfm = dfm(corp, remove_punct = T, remove=stopwords_en, stem=T)
+#Using only words which occur at least 5 times
+dfm = dfm_trim(dfm,min_docfreq = 5)
+dfm
+```
+
+```{r}
+#Document term metrix
+dtm = convert(dfm, to ="topicmodels")
+set.seed(42)
+#Probabilistic topic model with Gibbs sampling, k= number of topics, alpha = controls how spread the topics per documents are
+m = LDA(dtm, method="Gibbs",k=6,control = list(alpha=0.1))
+m
+dtm
+
+```
+
+```{r}
+terms(m, 10)
+
+```
+
+```{r}
+topic = 2
+#Posterior distribution - documents over topics, topics over words
+#Distribution of terms. Metrix- each row is a topic, each column is a word
+words = posterior(m)$terms[topic, ]
+#50 highest ranking words
+topwords = head(sort(words,decreasing = T),n=30)
+head(topwords)
+
+wordcloud(names(topwords),topwords)
+
+```
+
+```{r}
+#We can also look at the topics per document, to find the top documents per topic:
+topic.docs = posterior(m)$topics[ ,topic]
+topic.docs = sort(topic.docs,decreasing = T)
+head(topic.docs)
+
+```
+```{r}
+
+ap_topics <- tidy(m, matrix = "beta")
+ap_topics
+
+```
+```{r}
+ap_top_terms <- ap_topics %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>% 
+  ungroup() %>%
+  arrange(topic, -beta)
+
+ap_top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered()
+
+```
+```{r}
+#rows are documents, columns are topics
+topic=6
+topic.docs = posterior(m)$topics[,topic]
+topic.docs = sort(topic.docs,decreasing = T)
+head(topic.docs)
+weight_of_topic_a <- data.frame(topic.docs)
+str(weight_of_topic_a)
+
+```
+```{r}
+llis.topics <- topicmodels::topics(m, 1)
+llis.terms <- as.data.frame(topicmodels::terms(m,50),stringsAsFactors = FALSE)
+llis.terms
+
+```
+
+```{r}
+#Creating df from topics
+doctopics.df <- as.data.frame(llis.topics)
+doctopics.df <- dplyr::transmute(doctopics.df,transcriptID = rownames(doctopics.df),Topic = llis.topics)
+
+#joining these two dataframes together
+data.df <- full_join(transcript_df, doctopics.df, by = "transcriptID")
+data.df <- data.df %>%
+  drop_na(Topic)
+
+data.df <- data.df %>%
+  dplyr::select(transcriptID, Topic, createdTime, agentID, callerID, duration, direction, queueName, sentiment, emotion, confidence, transcription )
+
+data.df
+
+```
+
+```{r}
+data2.df <-data.df %>%
+  group_by(agentID,Topic)%>%
+  summarise(n= n(),confidence)
+data2.df$confidence <- as.double(data2.df$confidence)
+data2.df$Topic <- as.factor(data2.df$Topic)
+data2.df
+
+data2.df <-data2.df %>%
+  group_by(agentID, Topic)%>%
+  summarise(mean_confidence = mean(confidence))
+
+data2.df$mean_confidence <- round(data2.df$mean_confidence,2)
+data2.df$agentID[data2.df$agentID == "ag61C_7yTaQNaKDRnAXxt3vw"] <- "Agent1"
+data2.df$agentID[data2.df$agentID == "agAuZjTmR_QvOZ6OMC5U8YhQ"] <- "Agent2"
+data2.df$agentID[data2.df$agentID == "agBev5uNJDR924_gTsbOccQA"] <- "Agent3"
+data2.df$agentID[data2.df$agentID == "agBjCh9b2sSyKT2dfEW_Boxw"] <- "Agent4"
+data2.df$agentID[data2.df$agentID == "agDhT5X7VISoWBc1ZHcVbLiw"] <- "Agent5"
+data2.df$agentID[data2.df$agentID == "ageou4J6UdQra9K3RmEHsO8Q"] <- "Agent6"
+data2.df$agentID[data2.df$agentID == "agfauaSKCEQYqoTR1e59GNfg"] <- "Agent7"
+data2.df$agentID[data2.df$agentID == "agfUU69IIcTlGOHKBcPJ5qUA"] <- "Agent8"
+data2.df$agentID[data2.df$agentID == "agg3NK7ZzfTzOxCuDDhe5xWw"] <- "Agent9"
+data2.df$agentID[data2.df$agentID == "agiEJ2aFsuRtOwgxCxMY7i5Q"] <- "Agent10"
+data2.df$agentID[data2.df$agentID == "agnD1EfPfzQ46hsngZ4yeO0Q"] <- "Agent11"
+data2.df$agentID[data2.df$agentID == "agNL1__IFCQdKOZ4Jsn25bgw"] <- "Agent12"
+data2.df$agentID[data2.df$agentID == "agP3MWo1GpQUKLaFW0NeILBg"] <- "Agent13"
+data2.df$agentID[data2.df$agentID == "agqGZnfD_dQeS2PyoT193rOw"] <- "Agent14"
+data2.df$agentID[data2.df$agentID == "agT0A9fcYdTZeqbrthTv7uug"] <- "Agent15"
+data2.df$agentID[data2.df$agentID == "agUylEguURQ7OP2mA1GTp5qg"] <- "Agent16"
+data2.df$agentID[data2.df$agentID == "agvd2avJDPQCiBQ5k6Ure9Xw"] <- "Agent17"
+data2.df$agentID[data2.df$agentID == "agvMZOeLXxSim3Mu1ElsQPwQ"] <- "Agent18"
+data2.df$agentID[data2.df$agentID == "agVUInCdLRR4WX4g0rjAEuvw"] <- "Agent19"
+
+
+data2.df
+```
+
+```{r}
+data3.df <- data.frame(data2.df$agentID, data2.df$Topic, data2.df$mean_confidence)
+data3.df <- data3.df %>%
+  rename(agentID = data2.df.agentID, Topic = data2.df.Topic, mean_confidence=data2.df.mean_confidence)
+data3.df <- filter(data3.df, Topic == "1")
+data3.df
+
+```
+
+
+```{r}
+ggplot(data=data3.df, aes(x=reorder(agentID,mean_confidence), y=mean_confidence))+
+  geom_col()+
+  theme_minimal()+
+  ggtitle("Topic 1 mean confidence by agent")+
+  scale_y_continuous(breaks=seq(0, 1.0, by = 0.1))+
+  theme(
+    axis.text.x = element_text(angle = 85,hjust = 1),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    panel.grid.major.y = element_line(size = 0.4, linetype = 'solid',colour = "white"),
+    panel.ontop = TRUE,
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.y = element_blank()
+  )
+```
+
+```{r}
+data4.df <- data.frame(data2.df$agentID, data2.df$Topic, data2.df$mean_confidence)
+data4.df <- data4.df %>%
+  rename(agentID = data2.df.agentID, Topic = data2.df.Topic, mean_confidence=data2.df.mean_confidence)
+data4.df <- filter(data4.df, Topic == "2")
+data4.df
+
+```
+
+```{r}
+ggplot(data=data4.df, aes(x=reorder(agentID,mean_confidence), y=mean_confidence))+
+  geom_col()+
+  theme_minimal()+
+  ggtitle("Topic 2 mean confidence by agent")+
+  scale_y_continuous(breaks=seq(0, 1.0, by = 0.1))+
+  theme(
+    axis.text.x = element_text(angle = 85,hjust = 1),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    panel.grid.major.y = element_line(size = 0.4, linetype = 'solid',colour = "white"),
+    panel.ontop = TRUE,
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.y = element_blank()
+  )
+
+```
+```{r}
+data5.df <- data.frame(data2.df$agentID, data2.df$Topic, data2.df$mean_confidence)
+data5.df <- data5.df %>%
+  rename(agentID = data2.df.agentID, Topic = data2.df.Topic, mean_confidence=data2.df.mean_confidence)
+data5.df <- filter(data5.df, Topic == "3")
+data5.df
+
+```
+```{r}
+ggplot(data=data5.df, aes(x=reorder(agentID,mean_confidence), y=mean_confidence))+
+  geom_col()+
+  theme_minimal()+
+  ggtitle("Topic 3 mean confidence by agent")+
+  scale_y_continuous(breaks=seq(0, 1.0, by = 0.1))+
+  theme(
+    axis.text.x = element_text(angle = 85,hjust = 1),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    panel.grid.major.y = element_line(size = 0.4, linetype = 'solid',colour = "white"),
+    panel.ontop = TRUE,
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.y = element_blank()
+  )
+
+```
+
+```{r}
+data6.df <- data.frame(data2.df$agentID, data2.df$Topic, data2.df$mean_confidence)
+data6.df <- data6.df %>%
+  rename(agentID = data2.df.agentID, Topic = data2.df.Topic, mean_confidence=data2.df.mean_confidence)
+data6.df <- filter(data6.df, Topic == "4")
+data6.df
+
+```
+
+```{r}
+ggplot(data=data6.df, aes(x=reorder(agentID,mean_confidence), y=mean_confidence))+
+  geom_col()+
+  theme_minimal()+
+  ggtitle("Topic 4 mean confidence by agent")+
+  scale_y_continuous(breaks=seq(0, 1.0, by = 0.1))+
+  theme(
+    axis.text.x = element_text(angle = 85,hjust = 1),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    panel.grid.major.y = element_line(size = 0.4, linetype = 'solid',colour = "white"),
+    panel.ontop = TRUE,
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.y = element_blank()
+  )
+
+```
+
+```{r}
+data7.df <- data.frame(data2.df$agentID, data2.df$Topic, data2.df$mean_confidence)
+data7.df <- data7.df %>%
+  rename(agentID = data2.df.agentID, Topic = data2.df.Topic, mean_confidence=data2.df.mean_confidence)
+data7.df <- filter(data7.df, Topic == "5")
+data7.df
+```
+
+```{r}
+ggplot(data=data7.df, aes(x=reorder(agentID,mean_confidence), y=mean_confidence))+
+  geom_col()+
+  theme_minimal()+
+  ggtitle("Topic 5 mean confidence by agent")+
+  scale_y_continuous(breaks=seq(0, 1.0, by = 0.1))+
+  theme(
+    axis.text.x = element_text(angle = 85,hjust = 1),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    panel.grid.major.y = element_line(size = 0.4, linetype = 'solid',colour = "white"),
+    panel.ontop = TRUE,
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.y = element_blank()
+  )
+```
+
+
+```{r}
+data8.df <- data.frame(data2.df$agentID, data2.df$Topic, data2.df$mean_confidence)
+data8.df <- data8.df %>%
+  rename(agentID = data2.df.agentID, Topic = data2.df.Topic, mean_confidence=data2.df.mean_confidence)
+data8.df <- filter(data8.df, Topic == "6")
+data8.df
+
+```
+
+
+```{r}
+ggplot(data=data8.df, aes(x=reorder(agentID,mean_confidence), y=mean_confidence))+
+  geom_col()+
+  theme_minimal()+
+  ggtitle("Topic 6 mean confidence by agent")+
+  scale_y_continuous(breaks=seq(0, 1.0, by = 0.1))+
+  theme(
+    axis.text.x = element_text(angle = 85,hjust = 1),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    panel.grid.major.y = element_line(size = 0.4, linetype = 'solid',colour = "white"),
+    panel.ontop = TRUE,
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.y = element_blank()
+  )
+
+```
+```{r}
+corpus <- iconv(transcript_df2$transcription)
+
+```
+
+
+```{r}
+
+transcript_df2 <- transcript_df %>%
+  dplyr::select( transcription)
+
+```
+
+```{r}
+corpus <- iconv(transcript_df2$transcription)
+corpus <- Corpus(VectorSource(corpus))
+
+
+```
+
+
+```{r}
+#Cleaning the text
+corpus <- tm_map(corpus, tolower)
+corpus <- tm_map (corpus, removePunctuation)
+corpus <- tm_map(corpus,removeNumbers)
+clean_corpus <- tm_map(corpus, removeWords,stopwords('english'))
+clean_corpus <- tm_map(clean_corpus, stripWhitespace)
+```
+```{r}
+#Term Document Metrix
+tdm <- TermDocumentMatrix(clean_corpus)
+tdm
+tdm <- as.matrix(tdm)
+tdm[1:10,1:20]
+```
+```{r}
+#Barplot
+
+w <- rowSums(tdm)
+w <- subset(w, w>=25)
+w
+
+barplot(w, las=2, col=rainbow(50))
+
+```
+```{r}
+#Wordcloud
+word <- sort(rowSums(tdm),decreasing=TRUE)
+set.seed(42)
+wordcloud(words=names(word),freq=word,max.words = 150, random.order=F, min.freq = 5, colors = brewer.pal(8,"Dark2"),scale=c(5,0.3))
+```
+```{r}
+#Sentiment analysis
+text <-iconv(transcript_df2$transcription)
+#Obtain sentiment scores
+s <- get_nrc_sentiment(text)
+head(s)
+```
+```{r}
+#Barplot
+barplot(colSums(s), las=2,col=rainbow(10),ylab="Count",main="Sentiment Scores for Kaptec transcription")
+
+```
+```{r}
+#Creating dfm
+transcript_df2 %>%
+  corpus(text_field = "transcription")%>%
+  dfm()
+#Converting to GI_dict
+GI_dict = dictionary(DictionaryGI)
+
+result = dfm %>%
+  dfm_lookup(GI_dict) %>%
+  convert(to="data.frame")%>%
+  as_tibble
+
+result
+```
+```{r}
+
+
+
+
+transcript_df$agentID[transcript_df$agentID == "ag61C_7yTaQNaKDRnAXxt3vw"] <- "Agent1"
+transcript_df$agentID[transcript_df$agentID == "agAuZjTmR_QvOZ6OMC5U8YhQ"] <- "Agent2"
+transcript_df$agentID[transcript_df$agentID == "agBev5uNJDR924_gTsbOccQA"] <- "Agent3"
+transcript_df$agentID[transcript_df$agentID == "agBjCh9b2sSyKT2dfEW_Boxw"] <- "Agent4"
+transcript_df$agentID[transcript_df$agentID == "agDhT5X7VISoWBc1ZHcVbLiw"] <- "Agent5"
+transcript_df$agentID[transcript_df$agentID == "ageou4J6UdQra9K3RmEHsO8Q"] <- "Agent6"
+transcript_df$agentID[transcript_df$agentID == "agfauaSKCEQYqoTR1e59GNfg"] <- "Agent7"
+transcript_df$agentID[transcript_df$agentID == "agfUU69IIcTlGOHKBcPJ5qUA"] <- "Agent8"
+transcript_df$agentID[transcript_df$agentID == "agg3NK7ZzfTzOxCuDDhe5xWw"] <- "Agent9"
+transcript_df$agentID[transcript_df$agentID == "agiEJ2aFsuRtOwgxCxMY7i5Q"] <- "Agent10"
+transcript_df$agentID[transcript_df$agentID == "agnD1EfPfzQ46hsngZ4yeO0Q"] <- "Agent11"
+transcript_df$agentID[transcript_df$agentID == "agNL1__IFCQdKOZ4Jsn25bgw"] <- "Agent12"
+transcript_df$agentID[transcript_df$agentID == "agP3MWo1GpQUKLaFW0NeILBg"] <- "Agent13"
+transcript_df$agentID[transcript_df$agentID == "agqGZnfD_dQeS2PyoT193rOw"] <- "Agent14"
+transcript_df$agentID[transcript_df$agentID == "agT0A9fcYdTZeqbrthTv7uug"] <- "Agent15"
+transcript_df$agentID[transcript_df$agentID == "agUylEguURQ7OP2mA1GTp5qg"] <- "Agent16"
+transcript_df$agentID[transcript_df$agentID == "agvd2avJDPQCiBQ5k6Ure9Xw"] <- "Agent17"
+transcript_df$agentID[transcript_df$agentID == "agvMZOeLXxSim3Mu1ElsQPwQ"] <- "Agent18"
+transcript_df$agentID[transcript_df$agentID == "agVUInCdLRR4WX4g0rjAEuvw"] <- "Agent19"
+
+
+transcript_df$sentiment[transcript_df$sentiment == "Negative"] <- "-1"
+transcript_df$sentiment[transcript_df$sentiment == "Positive"] <- "1"
+transcript_df$sentiment[transcript_df$sentiment == "Neutral"] <- "0"
+transcript_df$sentiment[transcript_df$sentiment == "Mostly Positive"] <- "1"
+transcript_df$sentiment[transcript_df$sentiment == "Mostly Negative"] <- "-1"
+transcript_df$confidence <- as.numeric(transcript_df$confidence)
+transcript_df$sentiment <- as.numeric(transcript_df$sentiment)
+
+transcript_df4 <- transcript_df%>%
+  dplyr::select(duration,queueNumber, sentiment,confidence)
+transcript_df4
+
+```
+
+
+```{r}
+glimpse(transcript_df4)
+
+```
+```{r}
+transcript_lm_1 <- lm(sentiment ~ confidence * queueNumber * duration,  data = transcript_df3)
+broom::glance(transcript_lm_1)
+
+```
+```{r}
+#adding predictions and calculated residuals
+transcript.lm <- transcript_df3 %>%
+  add_predictions(transcript_lm_1)%>%
+  add_residuals(transcript_lm_1)
+
+transcript.lm$pred <- round(transcript.lm$pred,0)
+transcript.lm
+
+```
+```{r}
+#Plot the results
+ggplot(transcript.lm)+
+  geom_line(aes(confidence, pred), col = "red")+
+  geom_line(aes(confidence, sentiment))+
+  labs(y="Sentiment",title="Predicted sentiment using linear model")
+
+
+```
+
+```{r}
+ggplot(transcript.lm,aes(confidence, resid))+
+  geom_ref_line(h=0)+
+  geom_line()+
+  labs(title="Residuals of the linear model")
+
+
+```
+```{r}
+#polynomial regression
+transcript.poly <- lm(transcript_df3$sentiment ~ poly(transcript_df3$confidence * transcript_df3$queueNumber * transcript_df3$duration,2,raw=TRUE))
+broom::glance(transcript.poly)
+
+```
+```{r}
+transcript.polyn <- transcript_df3 %>%
+  add_predictions(transcript.poly)%>%
+  add_residuals(transcript.poly)
+
+transcript.polyn$pred <- round(transcript.polyn$pred,0)
+head(transcript.polyn)
+
+
+```
+```{r}
+#plot results
+ggplot(transcript.polyn)+
+  geom_line(aes( confidence, pred), col = "red")+
+  geom_line(aes(confidence, sentiment))+
+  labs(y="Sentiment",title="Predicted sentiment using polynomial model")
+
+
+```
+```{r}
+#plot residuals
+ggplot(transcript.polyn,aes(sentiment, resid))+
+  geom_ref_line(h=0)+
+  geom_line()+
+  labs(title="Residuals of the polynomial model")
+
+
+```
+```{r}
+#SVM model
+transcript.svm <-svm(sentiment ~ .,data=transcript_df3)
+transcript.df_svm <- transcript_df3 %>%
+  #add predictions to the model
+  add_predictions(transcript.svm)%>%
+  #add residuals to the model
+  add_residuals(transcript.svm)
+transcript.df_svm$pred <- round(transcript.df_svm$pred,0)
+transcript.df_svm
+
+```
+
+
+```{r}
+#plot results
+ggplot(transcript.df_svm)+
+  geom_line(aes(confidence,pred),col="red")+
+  geom_line(aes(confidence,sentiment))+
+  labs(y="Sentiment",title="Predicted sentiment using SVM Model")
+
+```
+```{r}
+#Plotting residuals
+ggplot(transcript.df_svm,aes(sentiment,resid))+
+  geom_ref_line(h=0)+
+  geom_line()+
+  labs(title="Residuals of the SVM model")
+
+
+```
+
+```{r}
+require(caTools)
+head(transcript_df4)
+summary(transcript_df4)
+transcript_df4 <- drop_na(transcript_df4)
+summary(transcript_df4)
+
+```
+```{r}
+sapply(transcript_df4,class)
+
+```
+```{r}
+transcript_df4 <- transform(transcript_df4,sentiment = as.factor(sentiment))
+```
+
+
+```{r}
+
+sapply(transcript_df4,class)
+```
+```{r}
+
+shuffle_index <- sample(1:nrow(transcript_df4))
+head(shuffle_index)
+#Splitting data to training and testing
+smp_size <- floor(0.75 * nrow(transcript_df4))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+train_ind <- sample(seq_len(nrow(transcript_df4)), size = smp_size)
+
+train <- transcript_df4[train_ind, ]
+test <- transcript_df4[-train_ind, ]
+
+```
+
+```{r}
+dim(train)
+dim(test)
+
+```
+```{r}
+#Decision tree
+fit <- rpart(sentiment~., data = train, method = 'class')
+rpart.plot(fit, extra = 106)
+````
+```{r}
+predict_unseen <-predict(fit, test, type = 'class')
+
+````
+
+```{r}
+table_mat <- table(test$sentiment, predict_unseen)
+table_mat
+
+```
+```{r}
+accuracy_Test <- sum(diag(table_mat)) / sum(table_mat)
+print(paste('Accuracy for test', accuracy_Test))
+
+```
+```{r}
+accuracy_tune <- function(fit) {
+    predict_unseen <- predict(fit, test, type = 'class')
+    table_mat <- table(test$sentiment, predict_unseen)
+    accuracy_Test <- sum(diag(table_mat)) / sum(table_mat)
+    accuracy_Test
+}
+
+```
+
+```{r}
+control <- rpart.control(minsplit = 4,
+    minbucket = round(5 / 3),
+    maxdepth = 3,
+    cp = 0)
+tune_fit <- rpart(sentiment~., data = train, method = 'class', control = control)
+accuracy_tune(tune_fit)
+
+```
+```{r}
+#Naive bayes
+
+set.seed(120)  # Setting Seed
+classifier_cl <- naiveBayes(sentiment ~ ., data = train)
+classifier_cl
+
+```
+```{r}
+y_pred <- predict(classifier_cl, newdata = test)
+
+```
+
+```{r}
+cm <- table(test$sentiment, y_pred)
+cm
+
+```
+
+```{r}
+confusionMatrix(cm)
+```
+
+
+
+```{r}
+#Random Forest
+set.seed(42)
+model1<- randomForest(sentiment~., data=train, importance=TRUE) 
+print(model1)
+
+#Out of bag error is 38,71%, so the train data set model accuracy is around 62%.
+
+```
+```{r}
+predTrain <- predict(model1, train, type = "class")
+# Checking classification accuracy
+table(predTrain,train$sentiment)  
+
+```
+
+```{r}
+pred = predict(rf, train)
+confusionMatrix(pred, train$sentiment)
+```
+
+```{r}
+
+cm = table(test[,4], pred)
+```
+
+```{r}
+
+cm
+```
